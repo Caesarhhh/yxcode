@@ -6,3 +6,5 @@ yanxiangCode/pretrain/*
 *.pt
 YOLOv5-Lite/runs/*
 YOLOv5-Lite/weights/*
+.history
+.vscode
