@@ -1,0 +1,50 @@
+# create by pogg
+# parameters
+ch: 1
+nc: 4  # number of classes
+depth_multiple: 1.0  # model depth multiple
+width_multiple: 1.0  # layer channel multiple
+# angle_num: 180 # 180 for csl, 1 for kfiou
+
+# anchors
+anchors:
+  - [ 10,13, 16,30, 33,23 ]  # P3/8
+  - [ 30,61, 62,45, 59,119 ]  # P4/16
+  - [ 116,90, 156,198, 373,326 ]  # P5/32
+
+# custom backbone
+backbone:
+  # [from, number, module, args]
+  [ [ -1, 1, Conv, [8, 3, 2, 1] ],   # 0-P1/2, add downsample
+    [ -1, 1, Conv, [16, 3, 2, 1] ],   # 1-P2/4, add downsample x2
+    [ -1, 1, conv_bn_relu_maxpool, [ 32 ] ],    # 2-P4/16
+    [ -1, 1, Shuffle_Block, [ 116, 2 ] ], # 3-P5/32
+    [ -1, 3, Shuffle_Block, [ 116, 1 ] ], # 4
+    [ -1, 1, Shuffle_Block, [ 232, 2 ] ], # 5-P6/64
+    [ -1, 7, Shuffle_Block, [ 232, 1 ] ], # 6
+    [ -1, 1, Shuffle_Block, [ 464, 2 ] ], # 7-P7/128
+    [ -1, 1, Shuffle_Block, [ 464, 1 ] ], # 8
+  ]
+
+# v5lite-e head
+head:
+  [ [ -1, 1, Conv, [ 96, 1, 1 ] ],
+    [ -1, 1, nn.Upsample, [ None, 2, 'nearest' ] ],
+    [ [ -1, 6 ], 1, Concat, [ 1 ] ],  # cat backbone P6
+    [ -1, 1, DWConvblock, [96, 3, 1] ],  # 12
+
+    [ -1, 1, Conv, [ 96, 1, 1 ] ], # 13
+    [ -1, 1, nn.Upsample, [ None, 2, 'nearest' ] ], 
+    [ [ -1, 4 ], 1, Concat, [ 1 ] ],  # cat backbone P5
+    [ -1, 1, DWConvblock, [96, 3, 1] ],  # 16 (P5/32-small)
+
+    [-1, 1, DWConvblock, [96, 3, 2]],
+    [ [ -1, 13 ], 1, ADD, [ 1 ] ],  # cat head P6
+    [ -1, 1, DWConvblock, [96, 3, 1] ],  # 19 (P6/64-medium)
+
+    [ -1, 1, DWConvblock, [ 96, 3, 2 ] ],
+    [ [ -1, 9 ], 1, ADD, [ 1 ] ],  # cat head P7
+    [ -1, 1, DWConvblock, [96, 3, 1] ],  # 22 (P7/128-large)
+
+    [ [ 16, 19, 22 ], 1, Detect, [ nc, anchors ] ],  # Detect(P5, P6, P7)
+  ]

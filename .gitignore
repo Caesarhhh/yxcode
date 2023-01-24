@@ -1,0 +1,8 @@
+yanxiangCode/runs/*
+yanxiangCode/pretrain/*
+*.jpg
+*.pretrain
+*.txt
+*.pt
+YOLOv5-Lite/runs/*
+YOLOv5-Lite/weights/*
