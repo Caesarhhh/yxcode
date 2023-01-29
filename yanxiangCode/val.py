@@ -629,6 +629,7 @@ def parse_opt():
     parser.add_argument('--use-f1', action='store_true')
     parser.add_argument('--scale-thred',type=float,default=0)
     parser.add_argument('--logdir',type=str,default="log.txt")
+    parser.add_argument('--loss-type',type=str,default="csl")
     parser.add_argument('--gray',action='store_true')
     opt = parser.parse_args()
     opt.data = check_yaml(opt.data)  # check YAML

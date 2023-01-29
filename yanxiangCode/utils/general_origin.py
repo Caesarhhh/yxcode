@@ -787,9 +787,9 @@ def non_max_suppression_obb(prediction, conf_thres=0.25, iou_thres=0.45, classes
         nc = prediction.shape[2] - 5 - 1
     xc = prediction[..., 4] > conf_thres  # candidates
     class_index = nc + 5
-    if loss_type=="dfl":
+    if loss_type=="dfl1":
         nc = prediction.shape[2] - 4 - 180  # number of classes
-        xc = prediction[..., 5] > conf_thres  # candidates
+        xc = prediction[..., 4].max(-1)[0] > conf_thres  # candidates
         class_index = nc + 4
         #prediction[...,4]=0
 
@@ -825,7 +825,7 @@ def non_max_suppression_obb(prediction, conf_thres=0.25, iou_thres=0.45, classes
             continue
 
         # Compute conf
-        if loss_type!="dfl":
+        if loss_type!="dfl1":
             x[:, 5:class_index] *= x[:, 4:5]  # conf = obj_conf * cls_conf
 
         _, theta_pred = torch.max(x[:, class_index:], 1,  keepdim=True) # [n_conf_thres, 1] θ ∈ int[0, 179]
@@ -836,16 +836,17 @@ def non_max_suppression_obb(prediction, conf_thres=0.25, iou_thres=0.45, classes
 
         # Detections matrix nx7 (xyls, θ, conf, cls) θ ∈ [-pi/2, pi/2)
         if multi_label:
-            if loss_type!="dfl":
+            if loss_type!="dfl1":
                 i, j = (x[:, 5:class_index] > conf_thres).nonzero(as_tuple=False).T # ()
                 x = torch.cat((x[i, :4], theta_pred[i], x[i, j + 5, None], j[:, None].float()), 1)
             else:
                 i, j = (x[:, 4:class_index] > conf_thres).nonzero(as_tuple=False).T # ()
                 x = torch.cat((x[i, :4], theta_pred[i], x[i, j + 4, None], j[:, None].float()), 1)
         else:  # best class only
-            conf, j = x[:, 5:class_index].max(1, keepdim=True)
-            if loss_type=="dfl":
+            if loss_type=="dfl1":
                 conf, j = x[:, 4:class_index].max(1, keepdim=True)
+            else:
+                conf, j = x[:, 5:class_index].max(1, keepdim=True)
             x = torch.cat((x[:, :4], theta_pred, conf, j.float()), 1)[conf.view(-1) > conf_thres]
 
         # Filter by class

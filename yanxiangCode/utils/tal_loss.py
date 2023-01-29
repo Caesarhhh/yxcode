@@ -103,7 +103,6 @@ class BboxLoss(nn.Module):
 def xywh2xyxy(x):
     """
     Convert bounding box coordinates from (x, y, width, height) format to (x1, y1, x2, y2) format where (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner.
-
     Args:
         x (np.ndarray) or (torch.Tensor): The input tensor containing the bounding box coordinates in (x, y, width, height) format.
     Returns:
@@ -141,7 +140,9 @@ class TALLoss:
         self.anchor_grid = m.anchor_grid
         self.assigner = TaskAlignedAssigner(topk=10, num_classes=self.nc, alpha=0.5, beta=6.0)
         self.bbox_loss = BboxLoss(self.reg_max - 1, use_dfl=self.use_dfl).to(device)
-        self.BCEtheta = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['theta_pw']], device=device),reduction="none")
+        self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], device=device))
+        self.BCEtheta = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['theta_pw']], device=device))
+        self.BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], device=device))
         self.proj = torch.arange(self.reg_max, dtype=torch.float, device=device)
 
     def _make_grid(self, nx=20, ny=20, i=0):
@@ -161,11 +162,11 @@ class TALLoss:
 
     def preprocess(self, targets, batch_size, scale_tensor):
         if targets.shape[0] == 0:
-            out = torch.zeros(batch_size, 0, 186, device=self.device)
+            out = torch.zeros(batch_size, 0, 184+self.nc, device=self.device)
         else:
             i = targets[:, 0]  # image index
             _, counts = i.unique(return_counts=True)
-            out = torch.zeros(batch_size, counts.max(), 186, device=self.device)
+            out = torch.zeros(batch_size, counts.max(), 184+self.nc, device=self.device)
             for j in range(batch_size):
                 matches = i == j
                 n = matches.sum()
@@ -183,7 +184,7 @@ class TALLoss:
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
     def __call__(self, preds, batch):
-        loss = torch.zeros(4, device=self.device)  # box, cls, dfl,theta
+        loss = torch.zeros(5, device=self.device)  # box, cls, dfl,theta
         feats = preds[1] if isinstance(preds, tuple) else preds
         #pred_distri, pred_scores, pred_thetas = torch.cat([xi.permute(0,4,1,2,3).view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
         #    (self.reg_max * 4 , self.nc,180), 1)
@@ -222,8 +223,9 @@ class TALLoss:
         strides=torch.cat(strides,1).to(grid.device)
         z=torch.cat(z,1)
         # targets
-        pred_scores=z[...,4:4+self.nc]
-        pred_thetas=z[...,4+self.nc:]
+        pred_objs=z[...,4]
+        pred_scores=z[...,5:5+self.nc]
+        pred_thetas=z[...,5+self.nc:]
         targets=batch
         # targets = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"]), 1)
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
@@ -233,21 +235,24 @@ class TALLoss:
         # pboxes
         pred_bboxes = xywh2xyxy(z[...,:4])  # xyxy, (b, h*w, 4)
 
-        _, target_bboxes, target_scores,target_gau_theta, fg_mask, _ = self.assigner(
+        _, target_bboxes, target_scores,target_gau_theta, fg_mask, _, target_obj = self.assigner(
             pred_scores.detach().sigmoid(), (pred_bboxes.detach()).type(gt_bboxes.dtype),
-            (grid) * strides, gt_labels, gt_bboxes, mask_gt,gt_gau_theta)
+            (grid) * strides, gt_labels, gt_bboxes, mask_gt,gt_gau_theta,torch.ones_like(gt_labels),pred_objs.detach().sigmoid())
 
         #target_bboxes /= strides
         target_scores_sum = target_scores.sum()
+        #target_scores_sum=1
 
         # cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         
-        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        #loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        loss[4] = self.BCEobj(pred_objs,target_obj)
 
         # bbox loss
         if fg_mask.sum():
-            loss_theta=self.BCEtheta(pred_thetas[fg_mask], target_gau_theta[fg_mask]).mean(-1).unsqueeze(-1)
+            loss[1] = self.BCEcls(pred_scores[fg_mask], target_scores[fg_mask].bool().to(dtype))
+            loss_theta=self.BCEtheta(pred_thetas[fg_mask], target_gau_theta[fg_mask])
             loss[0], loss[2], loss[3] = self.bbox_loss(pred_distri, pred_bboxes, grid, target_bboxes, target_scores,
                                               target_scores_sum,loss_theta, fg_mask)
             #loss[3] = self.BCEtheta(pred_thetas[fg_mask], target_gau_theta[fg_mask])
@@ -259,5 +264,6 @@ class TALLoss:
         loss[1] *= self.hyp['cls']  # cls gain
         loss[2] *= self.hyp['dfl']  # dfl gain
         loss[3] *= self.hyp['theta']  # theta gain
+        loss[4] *= self.hyp['obj']  # theta gain
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl,theta)

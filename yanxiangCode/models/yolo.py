@@ -120,7 +120,7 @@ class Detect(nn.Module):
         self.anchor_grid = [torch.zeros(1)] * self.nl  # init anchor grid
         self.anchor_type=anchor_type
         if loss_type=="dfl":
-            self.no=nc + 4 + angle_num
+            self.no=nc + 5 + angle_num
         if anchor_type=="af":
             self.na=1
         self.register_buffer('anchors', torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)

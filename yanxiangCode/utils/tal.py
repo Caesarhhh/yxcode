@@ -119,7 +119,7 @@ class TaskAlignedAssigner(nn.Module):
         self.eps = eps
 
     @torch.no_grad()
-    def forward(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt,gt_gau_theta):
+    def forward(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt,gt_gau_theta,gt_obj,pred_objs):
         """This code referenced to
            https://github.com/Nioolek/PPYOLOE_pytorch/blob/master/ppyoloe/assigner/tal_assigner.py
 
@@ -146,12 +146,12 @@ class TaskAlignedAssigner(nn.Module):
                     torch.zeros_like(pd_scores[..., 0]).to(device))
 
         mask_pos, align_metric, overlaps = self.get_pos_mask(pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points,
-                                                             mask_gt)
+                                                             mask_gt,pred_objs)
 
         target_gt_idx, fg_mask, mask_pos = select_highest_overlaps(mask_pos, overlaps, self.n_max_boxes)
 
         # assigned target
-        target_labels, target_bboxes, target_scores, target_gau_theta = self.get_targets(gt_labels, gt_bboxes,gt_gau_theta, target_gt_idx, fg_mask)
+        target_labels, target_bboxes, target_scores, target_gau_theta,target_obj = self.get_targets(gt_labels, gt_bboxes,gt_gau_theta, target_gt_idx, fg_mask,gt_obj)
 
         # normalize
         align_metric *= mask_pos
@@ -160,15 +160,16 @@ class TaskAlignedAssigner(nn.Module):
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
         target_scores_old=target_scores
         target_scores = target_scores * norm_align_metric
+        target_obj=target_obj*norm_align_metric.squeeze(-1)
 
         if(float(target_scores.sum())==0):
             print(target_scores.sum())
 
-        return target_labels, target_bboxes, target_scores, target_gau_theta, fg_mask.bool(), target_gt_idx
+        return target_labels, target_bboxes, target_scores, target_gau_theta, fg_mask.bool(), target_gt_idx,target_obj
 
-    def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt):
+    def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt,pred_objs):
         # get anchor_align metric, (b, max_num_obj, h*w)
-        align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes)
+        align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes,pred_objs)
         # get in_gts mask, (b, max_num_obj, h*w)
         mask_in_gts = select_candidates_in_gts(anc_points[0], gt_bboxes)
         # get topk_metric mask, (b, max_num_obj, h*w)
@@ -185,7 +186,7 @@ class TaskAlignedAssigner(nn.Module):
 
         return mask_pos, align_metric, overlaps
 
-    def get_box_metrics(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes):
+    def get_box_metrics(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes,pred_objs):
         ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
         ind[0] = torch.arange(end=self.bs).view(-1, 1).repeat(1, self.n_max_boxes)  # b, max_num_obj
         ind[1] = gt_labels.long().squeeze(-1)  # b, max_num_obj
@@ -193,7 +194,8 @@ class TaskAlignedAssigner(nn.Module):
         bbox_scores = pd_scores[ind[0], :, ind[1]]  # b, max_num_obj, h*w
 
         overlaps = bbox_iou(gt_bboxes.unsqueeze(2), pd_bboxes.unsqueeze(1), xywh=False, CIoU=True).squeeze(3).clamp(0)
-        align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
+        #align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
+        align_metric = pred_objs.unsqueeze(1).repeat(1,bbox_scores.shape[1],1).pow(self.alpha)*bbox_scores.pow(self.alpha)*overlaps.pow(self.beta)
         if float(align_metric.sum())==0:
             print(float(align_metric.sum()))
         return align_metric, overlaps
@@ -218,7 +220,7 @@ class TaskAlignedAssigner(nn.Module):
         is_in_topk = torch.where(is_in_topk > 1, 0, is_in_topk)
         return is_in_topk.to(metrics.dtype)
 
-    def get_targets(self, gt_labels, gt_bboxes,gt_gau_theta, target_gt_idx, fg_mask):
+    def get_targets(self, gt_labels, gt_bboxes,gt_gau_theta, target_gt_idx, fg_mask,gt_obj):
         """
         Args:
             gt_labels: (b, max_num_obj, 1)
@@ -235,6 +237,8 @@ class TaskAlignedAssigner(nn.Module):
         # assigned target boxes, (b, max_num_obj, 4) -> (b, h*w)
         target_bboxes = gt_bboxes.view(-1, 4)[target_gt_idx]
         target_gau_theta = gt_gau_theta.view(-1, 180)[target_gt_idx]
+        target_obj = fg_mask
+
 
         # assigned target scores
         target_labels.clamp(0)
@@ -245,7 +249,7 @@ class TaskAlignedAssigner(nn.Module):
         if(float(target_scores.sum())==0):
             print(target_scores.sum())
 
-        return target_labels, target_bboxes, target_scores, target_gau_theta
+        return target_labels, target_bboxes, target_scores, target_gau_theta, target_obj
 
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):

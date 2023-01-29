@@ -255,6 +255,8 @@ def run(data,
     loss = torch.zeros(4, device=device)
     if loss_type=="kfiou":
         loss = torch.zeros(2, device=device)
+    elif loss_type=="dfl":
+        loss = torch.zeros(5, device=device)
     jdict, stats, ap, ap_class = [], [], [], []
     pbar = tqdm(dataloader, desc=s, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
     for batch_i, (im, targets, paths, shapes) in enumerate(pbar):

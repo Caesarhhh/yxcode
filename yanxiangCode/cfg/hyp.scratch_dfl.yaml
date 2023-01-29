@@ -7,13 +7,13 @@ warmup_momentum: 0.8
 warmup_bias_lr: 0.1
 box: 0.05
 dfl: 1.5
-cls: 0.5 
+cls: 0.5
 cls_pw: 1.0
 obj: 1.0
 obj_pw: 1.0
 iou_t: 0.2
 anchor_t: 4.0
-theta: 0.05
+theta: 0.5
 theta_pw: 1.0
 fl_gamma: 0.0
 hsv_h: 0.015

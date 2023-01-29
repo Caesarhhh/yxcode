@@ -249,7 +249,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
     mlc = int(np.concatenate(dataset.labels, 0)[:, 0].max())  # max label class
     nb = len(train_loader)  # number of batches
-    assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
+    #assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
 
     # Process 0
     if RANK in [-1, 0]:
@@ -347,6 +347,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         mloss = torch.zeros(4, device=device)  # mean losses
         if hyp["loss_type"]=='kfiou':
             mloss = torch.zeros(2, device=device)
+        elif hyp["loss_type"]=='dfl':
+            mloss = torch.zeros(5, device=device)
         if RANK != -1:
             if hyp['enhance_ratio']<=0:
                 train_loader.sampler.set_epoch(epoch)
@@ -355,7 +357,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         if hyp["loss_type"]=='kfiou':
             LOGGER.info(('\n' + '%10s' * 6) % ('Epoch', 'gpu_mem', 'box', 'cls', 'box', 'img_size'))
         elif hyp["loss_type"]=='dfl':
-            LOGGER.info(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'box', 'cls', 'dfl', 'theta', 'labels', 'img_size'))
+            LOGGER.info(('\n' + '%10s' * 9) % ('Epoch', 'gpu_mem', 'box', 'cls', 'dfl', 'theta','obj', 'labels', 'img_size'))
         else:
             LOGGER.info(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'theta', 'labels', 'img_size'))
         if RANK in [-1, 0]:
@@ -447,6 +449,9 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 # pbar.set_description(('%10s' * 2 + '%10.4g' * 5) % (
                 if hyp["loss_type"]=="kfiou":
                     pbar.set_description(('%10s' * 2 + '%10.4g' * 4) % (
+                    f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1]))
+                elif hyp["loss_type"]=="dfl":
+                    pbar.set_description(('%10s' * 2 + '%10.4g' * 7) % (
                     f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1]))
                 else:
                     pbar.set_description(('%10s' * 2 + '%10.4g' * 6) % (
